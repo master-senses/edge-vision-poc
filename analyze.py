@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -109,30 +110,46 @@ def _run_inference(
     model,
     pil_image: Image.Image,
     question: str,
-    _timeout_s: float,
+    timeout_s: float,
     frame_index: int,
 ) -> InferenceRecord:
     t0 = time.perf_counter()
+    ex = ThreadPoolExecutor(max_workers=1)
     try:
-        result = model.query(pil_image, question)
+        fut = ex.submit(model.query, pil_image, question)
+        limit = None if timeout_s <= 0 else timeout_s
+        result = fut.result(timeout=limit)
+    except TimeoutError as exc:
         latency_ms = (time.perf_counter() - t0) * 1000
-        answer = result.get("answer", "") if isinstance(result, dict) else str(result)
-        return InferenceRecord(
+        rec = InferenceRecord(
+            frame_index=frame_index,
+            latency_ms=latency_ms,
+            answer="",
+            success=False,
+            error=f"timeout:{exc}",
+        )
+    except Exception as exc:
+        latency_ms = (time.perf_counter() - t0) * 1000
+        rec = InferenceRecord(
+            frame_index=frame_index,
+            latency_ms=latency_ms,
+            answer="",
+            success=False,
+            error=f"error:{exc}",
+        )
+    else:
+        latency_ms = (time.perf_counter() - t0) * 1000
+        answer = result["answer"]
+        rec = InferenceRecord(
             frame_index=frame_index,
             latency_ms=latency_ms,
             answer=answer,
             success=True,
         )
-    except Exception as exc:
-        latency_ms = (time.perf_counter() - t0) * 1000
-        kind = "timeout" if isinstance(exc, TimeoutError) else "error"
-        return InferenceRecord(
-            frame_index=frame_index,
-            latency_ms=latency_ms,
-            answer="",
-            success=False,
-            error=f"{kind}:{exc}",
-        )
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
+    return rec
 
 
 def run(cfg: RunConfig) -> dict:
@@ -376,7 +393,7 @@ Examples:
         type=float,
         default=30.0,
         metavar="SECONDS",
-        help="Planned client-side infer timeout (not enforced yet; Moondream SDK call is synchronous)",
+        help="Max seconds per model.query call (ThreadPoolExecutor; overrun work may finish in background)",
     )
     parser.add_argument(
         "--api-key",

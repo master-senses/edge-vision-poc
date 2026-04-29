@@ -77,7 +77,7 @@ docker run --rm \
     "frames_read_total": 300,
     "frames_sampled": 30,
     "source_fps_reported": 30.0,
-    "actual_ingest_fps": 28.7
+    "actual_ingest_fps": 28.7 // how fast we moved through the video in a run
   },
   "inference": {
     "device": "cpu",
@@ -93,7 +93,7 @@ docker run --rm \
       "mean_ms": 445.7,
       "samples": 30
     },
-    "throughput_fps": 0.84
+    "throughput_fps": 0.84 // how fast am i hitting moondream per second
   },
   "failure_modes": {
     "decode_errors": 0,
@@ -121,7 +121,7 @@ docker run --rm \
 --question        Natural language question per sampled frame (default: "Is there a person in this image?")
 --sample-every-n  Run inference on every Nth frame (default: 10 → ~3 infers/sec at 30fps source)
 --max-frames      Stop after N frames total; required for live RTSP runs
---infer-timeout   Reserved client timeout (not enforced on SDK call yet)
+--infer-timeout   Per-call cap on model.query (seconds; 0 = wait indefinitely)
 --api-key         Moondream API key (or MOONDREAM_API_KEY env var)
 --output          Write JSON report to file (default: stdout)
 ```
@@ -133,7 +133,7 @@ docker run --rm \
 | ---------------------------- | -------------------------------------------------------- |
 | Decode error (bad file)      | `truncate -s 50% video.mp4` then run against it          |
 | Decode error (wrong format)  | Rename a `.txt` file as `.mp4` and feed it               |
-| Inference error              | Pass an invalid API key                                  |
+| Inference timeout            | `--infer-timeout 0.001` (forces most calls to time out)  |
 | Network / API instability    | Block outbound HTTPS briefly mid-run, or use a bad proxy |
 | Stream disconnect (RTSP sim) | Point at a port that accepts TCP then closes             |
 | Ingest backpressure          | `--sample-every-n 1` on a high-res source                |
