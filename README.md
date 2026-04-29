@@ -4,16 +4,18 @@ A CLI tool that ingests MP4 or RTSP video, runs [Moondream](https://moondream.ai
 
 ## What it measures
 
-| Field | Why it matters in a real deployment |
-|---|---|
-| `ingest.actual_ingest_fps` | Is the decode pipeline keeping up with the source? |
-| `failure_modes.decode_errors` | Corrupted frames, bad container, stream reconnect failures |
-| `inference.latency.p50_ms` | Typical user-visible latency |
-| `inference.latency.p95_ms` | Tail latency — what actually breaks SLAs |
-| `inference.device` + `gpu_mem_*` | Confirms hardware path; flags if GPU absent |
-| `failure_modes.inference_timeouts` | Network/API flakiness under load |
-| `deployment_readiness.verdict` | PASS / WARN / FAIL with explicit notes |
-| `repro.docker_run` | One-command reproduction path for any operator |
+
+| Field                              | Why it matters in a real deployment                        |
+| ---------------------------------- | ---------------------------------------------------------- |
+| `ingest.actual_ingest_fps`         | Is the decode pipeline keeping up with the source?         |
+| `failure_modes.decode_errors`      | Corrupted frames, bad container, stream reconnect failures |
+| `inference.latency.p50_ms`         | Typical user-visible latency                               |
+| `inference.latency.p95_ms`         | Tail latency — what actually breaks SLAs                   |
+| `inference.device` + `gpu_mem_`*   | Confirms hardware path; flags if GPU absent                |
+| `failure_modes.inference_timeouts` | Network/API flakiness under load                           |
+| `deployment_readiness.verdict`     | PASS / WARN / FAIL with explicit notes                     |
+| `repro.docker_run`                 | One-command reproduction path for any operator             |
+
 
 Inference is run on **sampled frames** (every Nth, configurable). This is deliberate: production systems choose an observation policy rather than burning compute on every frame. The report names the policy so a customer can audit it.
 
@@ -119,21 +121,23 @@ docker run --rm \
 --question        Natural language question per sampled frame (default: "Is there a person in this image?")
 --sample-every-n  Run inference on every Nth frame (default: 10 → ~3 infers/sec at 30fps source)
 --max-frames      Stop after N frames total; required for live RTSP runs
---infer-timeout   Seconds before inference is counted as a timeout (default: 30)
+--infer-timeout   Reserved client timeout (not enforced on SDK call yet)
 --api-key         Moondream API key (or MOONDREAM_API_KEY env var)
 --output          Write JSON report to file (default: stdout)
 ```
 
 ## Simulating failure modes without special hardware
 
-| Failure class | How to trigger locally |
-|---|---|
-| Decode error (bad file) | `truncate -s 50% video.mp4` then run against it |
-| Decode error (wrong format) | Rename a `.txt` file as `.mp4` and feed it |
-| Inference timeout | Set `--infer-timeout 0.001` — forces every call to time out |
-| Inference error | Pass an invalid API key |
-| Stream disconnect (RTSP sim) | Point at a port that accepts TCP then closes: `nc -l 554 &` then run |
-| Ingest backpressure | Use `--sample-every-n 1` on a high-res source to flood the pipeline |
+
+| Failure class                | How to trigger locally                                   |
+| ---------------------------- | -------------------------------------------------------- |
+| Decode error (bad file)      | `truncate -s 50% video.mp4` then run against it          |
+| Decode error (wrong format)  | Rename a `.txt` file as `.mp4` and feed it               |
+| Inference error              | Pass an invalid API key                                  |
+| Network / API instability    | Block outbound HTTPS briefly mid-run, or use a bad proxy |
+| Stream disconnect (RTSP sim) | Point at a port that accepts TCP then closes             |
+| Ingest backpressure          | `--sample-every-n 1` on a high-res source                |
+
 
 ## What "deployment ready" means in this report
 
@@ -154,3 +158,4 @@ typical targets are `drop_pct < 5%`, `p95 < 2000ms` for async pipelines, and
 - **No GPU on dev machine:** Report flags this explicitly. Numbers are a harness baseline, not a production benchmark.
 - **RTSP support:** Uses OpenCV's `VideoCapture` with TCP transport. Works for most IP cameras on LAN; exotic firmware quirks (non-standard codec profiles, digest auth edge cases) are expected in the field.
 - **No model accuracy eval:** Precision/recall requires a ground-truth labeled dataset; that is out of scope for this readiness harness.
+

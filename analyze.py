@@ -1,8 +1,4 @@
-"""
-Edge Vision POC Lab — Deployment Readiness Analyzer
-Ingests MP4 or RTSP, samples frames, runs Moondream inference,
-and outputs a JSON Deployment Readiness Report.
-"""
+"""CLI: ingest MP4/RTSP, sample frames, Moondream query, JSON deployment readiness report."""
 
 import argparse
 import json
@@ -10,7 +6,8 @@ import os
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
+from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,11 +15,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
-try:
-    import moondream as md
-except ImportError:
-    print("ERROR: moondream SDK not installed. Run: pip install moondream", file=sys.stderr)
-    sys.exit(1)
+import moondream as md
+import pynvml
 
 
 @dataclass
@@ -65,33 +59,33 @@ class FailureSummary:
 
 
 def _detect_device() -> dict:
-    """Report GPU availability honestly."""
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=3
-        )
-        if result.returncode == 0:
-            parts = result.stdout.strip().split(",")
-            used_mb, total_mb = int(parts[0].strip()), int(parts[1].strip())
-            return {"device": "cuda", "gpu_mem_used_mb": used_mb, "gpu_mem_total_mb": total_mb, "note": None}
-    except Exception:
-        pass
-    return {
+    cpu = {
         "device": "cpu",
         "gpu_mem_used_mb": None,
         "gpu_mem_total_mb": None,
         "note": "No GPU detected; latency reflects CPU + network path only. "
                 "For Jetson/bare-metal benchmarks, rerun on target hardware.",
     }
+    try:
+        pynvml.nvmlInit()
+    except Exception:
+        return cpu
+    try:
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        used_mb = int(mem.used // (1024 * 1024))
+        total_mb = int(mem.total // (1024 * 1024))
+        return {"device": "cuda", "gpu_mem_used_mb": used_mb, "gpu_mem_total_mb": total_mb, "note": None}
+    except Exception:
+        return cpu
+    finally:
+        with suppress(Exception):
+            pynvml.nvmlShutdown()
 
 
 def _open_capture(source: str) -> cv2.VideoCapture:
-    """Open VideoCapture for MP4 path or RTSP URL."""
     is_rtsp = source.lower().startswith("rtsp://")
     if is_rtsp:
-        # Prefer TCP transport; avoids dropped-packet UDP issues on most LAN cameras
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
@@ -101,21 +95,23 @@ def _open_capture(source: str) -> cv2.VideoCapture:
 
 
 def _read_source_meta(cap: cv2.VideoCapture) -> tuple[float, int]:
-    """Return (source_fps, total_frame_count). Count is 0 for live RTSP."""
     fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     return fps, total
 
 
 def _frame_to_pil(bgr_frame: np.ndarray) -> Image.Image:
-    """Convert OpenCV BGR frame to PIL RGB image for Moondream."""
     rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
     return Image.fromarray(rgb)
 
 
-def _run_inference(model, pil_image: Image.Image, question: str, timeout_s: float) -> InferenceRecord:
-    """Call Moondream query with timing; classify errors by type."""
-    frame_index = -1  # set by caller
+def _run_inference(
+    model,
+    pil_image: Image.Image,
+    question: str,
+    _timeout_s: float,
+    frame_index: int,
+) -> InferenceRecord:
     t0 = time.perf_counter()
     try:
         result = model.query(pil_image, question)
@@ -127,23 +123,15 @@ def _run_inference(model, pil_image: Image.Image, question: str, timeout_s: floa
             answer=answer,
             success=True,
         )
-    except TimeoutError as exc:
-        latency_ms = (time.perf_counter() - t0) * 1000
-        return InferenceRecord(
-            frame_index=frame_index,
-            latency_ms=latency_ms,
-            answer="",
-            success=False,
-            error=f"timeout:{exc}",
-        )
     except Exception as exc:
         latency_ms = (time.perf_counter() - t0) * 1000
+        kind = "timeout" if isinstance(exc, TimeoutError) else "error"
         return InferenceRecord(
             frame_index=frame_index,
             latency_ms=latency_ms,
             answer="",
             success=False,
-            error=f"error:{exc}",
+            error=f"{kind}:{exc}",
         )
 
 
@@ -186,7 +174,6 @@ def run(cfg: RunConfig) -> dict:
                 failures.decode_errors += 1
                 print(f"[{run_id[:8]}] DECODE ERROR on first frame — bad file or stream gone.", file=sys.stderr)
                 break
-            # Normal end-of-file for MP4
             break
 
         frame_idx += 1
@@ -197,14 +184,13 @@ def run(cfg: RunConfig) -> dict:
 
         try:
             pil_img = _frame_to_pil(raw_frame)
-        except Exception as exc:
+        except cv2.error as exc:
             failures.decode_errors += 1
             print(f"[{run_id[:8]}] Frame {frame_idx}: color conversion failed: {exc}", file=sys.stderr)
             continue
 
         print(f"[{run_id[:8]}] Frame {frame_idx}: running inference...", file=sys.stderr)
-        rec = _run_inference(model, pil_img, cfg.question, cfg.infer_timeout_s)
-        rec.frame_index = frame_idx
+        rec = _run_inference(model, pil_img, cfg.question, cfg.infer_timeout_s, frame_idx)
 
         if rec.success:
             print(f"[{run_id[:8]}] Frame {frame_idx}: {rec.latency_ms:.0f}ms → {rec.answer!r}", file=sys.stderr)
@@ -240,7 +226,6 @@ def run(cfg: RunConfig) -> dict:
     actual_ingest_fps = ingest.frames_read / ingest_wall_elapsed if ingest_wall_elapsed > 0 else 0.0
     infer_throughput_fps = len(records) / ingest_wall_elapsed if ingest_wall_elapsed > 0 else 0.0
 
-    # Dropped-frame calculation: how many sampled frames were skipped due to inference failures
     sampled_count = ingest.frames_read // cfg.sample_every_n
     failed_count = failures.inference_timeouts + failures.inference_errors + failures.decode_errors
     drop_pct = round((failed_count / sampled_count * 100) if sampled_count > 0 else 0.0, 2)
@@ -391,7 +376,7 @@ Examples:
         type=float,
         default=30.0,
         metavar="SECONDS",
-        help="Seconds before an inference call is considered timed out (default: 30)",
+        help="Planned client-side infer timeout (not enforced yet; Moondream SDK call is synchronous)",
     )
     parser.add_argument(
         "--api-key",
