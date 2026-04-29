@@ -17,9 +17,9 @@ A CLI tool that ingests MP4 or RTSP video, runs [Moondream](https://moondream.ai
 | `repro.docker_run`                 | One-command reproduction path for any operator             |
 
 
-Inference is run on **sampled frames** (every Nth, configurable). This is deliberate: production systems choose an observation policy rather than burning compute on every frame. The report names the policy so a customer can audit it.
+Inference is run on **sampled frames** (every Nth, configurable).   
 
-## Quick start (local Python)
+Quick start (local Python)
 
 ```bash
 pip install -r requirements.txt
@@ -139,23 +139,21 @@ docker run --rm \
 | Ingest backpressure          | `--sample-every-n 1` on a high-res source                |
 
 
-## What "deployment ready" means in this report
+## What "deployment ready" means
 
-This report answers the **integration surface**, not the **model's accuracy** on your use case:
+This report answers the **integration surface** (not **model accuracy)**:
 
 - The inference backend is reachable and returns structured answers
 - Ingest can decode the source format without errors
 - Tail latency (p95) is measurable and consistent enough to reason about
 - The full path is reproducible by another operator via `docker run`
 
-**For production sign-off**, thresholds should be set jointly with the customer's SRE:
-typical targets are `drop_pct < 5%`, `p95 < 2000ms` for async pipelines, and
-`p95 < 150ms` for real-time control loops. Those numbers belong in a customer-specific `config.json`, not hardcoded here.
+**For production sign-off**, thresholds should be set jointly with the customer's SRE: typical targets are `drop_pct < 5%`, `p95 < 2000ms` for async pipelines, and `p95 < 150ms` for real-time control loops.
 
 ## Scope and honest limits
 
-- **Hosted API only (Phase 1):** Latency numbers include network + TLS. On-device Jetson inference with local weights will be significantly faster — run phase 2 on target hardware.
-- **No GPU on dev machine:** Report flags this explicitly. Numbers are a harness baseline, not a production benchmark.
-- **RTSP support:** Uses OpenCV's `VideoCapture` with TCP transport. Works for most IP cameras on LAN; exotic firmware quirks (non-standard codec profiles, digest auth edge cases) are expected in the field.
-- **No model accuracy eval:** Precision/recall requires a ground-truth labeled dataset; that is out of scope for this readiness harness.
+- **Hosted API only (Phase 1):** Latency numbers include network + TLS. On-device Jetson inference with local weights will be significantly faster.
+- **No GPU on dev machine.**
+- **RTSP support:** Uses OpenCV's `VideoCapture` with TCP transport.
+- **No model accuracy eval.**
 
