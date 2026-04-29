@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
+from dotenv import load_dotenv
+
 import cv2
 import numpy as np
 from PIL import Image
@@ -251,7 +253,7 @@ def run(cfg: RunConfig) -> dict:
 
     docker_cmd = (
         f"docker run --rm \\\n"
-        f"  -e MOONDREAM_API_KEY=$MOONDREAM_API_KEY \\\n"
+        f"  -e Moondream_API_KEY=$Moondream_API_KEY \\\n"
         f"  -v \"$(pwd)/your_video.mp4:/data/input.mp4\" \\\n"
         f"  edge-vision-poc \\\n"
         f"  --input /data/input.mp4 \\\n"
@@ -352,6 +354,8 @@ def _error_report(run_id: str, started_at: str, cfg: RunConfig, error_code: str,
 
 
 def main() -> None:
+    load_dotenv()
+
     parser = argparse.ArgumentParser(
         description="Edge Vision POC Lab — Deployment Readiness Analyzer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -397,8 +401,8 @@ Examples:
     )
     parser.add_argument(
         "--api-key",
-        default=os.environ.get("MOONDREAM_API_KEY", ""),
-        help="Moondream API key (or set MOONDREAM_API_KEY env var)",
+        default=os.environ.get("Moondream_API_KEY", ""),
+        help="Moondream API key (or Moondream_API_KEY in env)",
     )
     parser.add_argument(
         "--output",
@@ -411,7 +415,8 @@ Examples:
 
     if not args.api_key:
         print(
-            "ERROR: Moondream API key required. Pass --api-key or set MOONDREAM_API_KEY.",
+            "ERROR: Moondream API key required. Pass --api-key or set Moondream_API_KEY "
+            "in project .env.",
             file=sys.stderr,
         )
         sys.exit(1)
