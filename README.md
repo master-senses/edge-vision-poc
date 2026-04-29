@@ -77,7 +77,7 @@ docker run --rm \
     "frames_read_total": 300,
     "frames_sampled": 30,
     "source_fps_reported": 30.0,
-    "actual_ingest_fps": 28.7 // how fast we moved through the video in a run
+    "actual_ingest_fps": 28.7 // how fast we moved through the video in a run (all video frames processed / total time)
   },
   "inference": {
     "device": "cpu",
@@ -93,7 +93,7 @@ docker run --rm \
       "mean_ms": 445.7,
       "samples": 30
     },
-    "throughput_fps": 0.84 // how fast am i hitting moondream per second
+    "throughput_fps": 0.84 // sampled frames sent to Moondream / total run time
   },
   "failure_modes": {
     "decode_errors": 0,
